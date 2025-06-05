@@ -1,14 +1,5 @@
 import PropTypes from "prop-types";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  Divider,
-  formControlLabelClasses,
-  Stack,
-  SvgIcon,
-  Typography,
-} from "@mui/material";
+import { Card, CardContent, CardHeader, Divider, Stack, SvgIcon, Typography } from "@mui/material";
 import { styled } from "@mui/material/styles";
 import {
   Timeline,
@@ -75,20 +66,34 @@ const CippStandardsSideBar = ({
   edit,
 }) => {
   const [currentStep, setCurrentStep] = useState(0);
+  const [savedItem, setSavedItem] = useState(null);
+  const dialogAfterEffect = (id) => {
+    setSavedItem(id);
+  };
 
   const watchForm = useWatch({ control: formControl.control });
 
   useEffect(() => {
     const stepsStatus = {
-      step1: !!watchForm.templateName,
-      step2: watchForm.tenantFilter && watchForm.tenantFilter.length > 0,
+      step1: !!_.get(watchForm, "templateName"),
+      step2: _.get(watchForm, "tenantFilter", []).length > 0,
       step3: Object.keys(selectedStandards).length > 0,
       step4:
-        watchForm.standards &&
+        _.get(watchForm, "standards") &&
         Object.keys(selectedStandards).length > 0 &&
         Object.keys(selectedStandards).every((standardName) => {
           const standardValues = _.get(watchForm, `${standardName}`, {});
-          return standardValues.action;
+          const standard = selectedStandards[standardName];
+          // Check if this standard requires an action
+          const hasRequiredComponents =
+            standard?.addedComponent &&
+            standard.addedComponent.some(
+              (comp) => comp.type !== "switch" && comp.required !== false
+            );
+          const actionRequired = standard?.disabledFeatures !== undefined || hasRequiredComponents;
+          // Always require an action value which should be an array with at least one element
+          const actionValue = _.get(standardValues, "action");
+          return actionValue && (!Array.isArray(actionValue) || actionValue.length > 0);
         }),
     };
 
@@ -96,16 +101,20 @@ const CippStandardsSideBar = ({
     setCurrentStep(completedSteps);
   }, [selectedStandards, watchForm]);
 
+  // Create a local reference to the stepsStatus from the latest effect run
   const stepsStatus = {
-    step1: !!watchForm.templateName,
-    step2: watchForm.tenantFilter && watchForm.tenantFilter.length > 0,
+    step1: !!_.get(watchForm, "templateName"),
+    step2: _.get(watchForm, "tenantFilter", []).length > 0,
     step3: Object.keys(selectedStandards).length > 0,
     step4:
-      watchForm.standards &&
+      _.get(watchForm, "standards") &&
       Object.keys(selectedStandards).length > 0 &&
       Object.keys(selectedStandards).every((standardName) => {
         const standardValues = _.get(watchForm, `${standardName}`, {});
-        return standardValues.action;
+        const standard = selectedStandards[standardName];
+        // Always require an action for all standards (must be an array with at least one element)
+        const actionValue = _.get(standardValues, "action");
+        return actionValue && (!Array.isArray(actionValue) || actionValue.length > 0);
       }),
   };
   return (
@@ -123,13 +132,25 @@ const CippStandardsSideBar = ({
             fullWidth
           />
           <Divider />
+          <CippFormComponent
+            type="richText"
+            name="description"
+            label="Description"
+            formControl={formControl}
+            placeholder="Enter a description for the template"
+            fullWidth
+          />
+          <Divider />
           <CippFormTenantSelector
             allTenants={true}
             label="Included Tenants"
             formControl={formControl}
             required={true}
+            includeGroups={true}
           />
-          {watchForm.tenantFilter?.some((tenant) => tenant.value === "AllTenants") && (
+          {watchForm.tenantFilter?.some(
+            (tenant) => tenant.value === "AllTenants" || tenant.type === "Group"
+          ) && (
             <>
               <Divider />
               <CippFormTenantSelector
@@ -137,6 +158,7 @@ const CippStandardsSideBar = ({
                 name="excludedTenants"
                 allTenants={false}
                 formControl={formControl}
+                includeGroups={true}
               />
             </>
           )}
@@ -208,6 +230,7 @@ const CippStandardsSideBar = ({
       </ActionList>
       <Divider />
       <CippApiDialog
+        dialogAfterEffect={(data) => dialogAfterEffect(data.id)}
         createDialog={createDialog}
         title="Add Standard"
         api={{
@@ -220,15 +243,21 @@ const CippStandardsSideBar = ({
           data: {
             tenantFilter: "tenantFilter",
             excludedTenants: "excludedTenants",
+            description: "description",
             templateName: "templateName",
             standards: "standards",
             ...(edit ? { GUID: "GUID" } : {}),
+            ...(savedItem ? { GUID: savedItem } : {}),
             runManually: "runManually",
           },
         }}
         row={formControl.getValues()}
         formControl={formControl}
-        relatedQueryKeys={"listStandardTemplates"}
+        relatedQueryKeys={[
+          "listStandardTemplates",
+          "listStandards",
+          `listStandardTemplates-${watchForm.GUID}`,
+        ]}
       />
     </Card>
   );
